@@ -1,6 +1,6 @@
 import { InferenceClient } from '@huggingface/inference';
 
-const hfClient = new InferenceClient(process.env.HF_API_KEY);
+const hfClient = new InferenceClient(process.env.NEXT_PUBLIC_HF_API_KEY);
 
 export const getCodeSuggestions = async (prompt) => {
   try {
