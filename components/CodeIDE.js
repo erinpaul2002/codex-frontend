@@ -159,34 +159,6 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
     cardStyle = { ...cardStyle, position: 'fixed', left: '50%', top: '20%', transform: 'translate(-50%, 0)', maxWidth: CARD_MAX_WIDTH, wordBreak: 'break-word', whiteSpace: 'pre-line', overflowWrap: 'break-word' };
   }
 
-  // Arrow SVGs
-  const ArrowSVG = ({ dir }) => {
-    if (dir === 'up')
-      return <svg width="32" height="16" className="absolute" style={arrowStyle}><polygon points="16,0 32,16 0,16" fill="#1e40af" /></svg>;
-    if (dir === 'down')
-      return <svg width="32" height="16" className="absolute" style={arrowStyle}><polygon points="0,0 32,0 16,16" fill="#1e40af" /></svg>;
-    if (dir === 'left')
-      return <svg width="16" height="32" className="absolute" style={arrowStyle}><polygon points="16,0 16,32 0,16" fill="#1e40af" /></svg>;
-    if (dir === 'right')
-      return <svg width="16" height="32" className="absolute" style={arrowStyle}><polygon points="0,0 16,16 0,32" fill="#1e40af" /></svg>;
-    return null;
-  };
-
-  // Animated hand/arrow indicator
-  const Indicator = () => highlightRect ? (
-    <div
-      className="fixed z-50 animate-bounce"
-      style={{
-        left: highlightRect.left + highlightRect.width / 2 - 16,
-        top: highlightRect.bottom + 8,
-        pointerEvents: 'none',
-      }}
-    >
-      <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M16 2v24M16 26l-6-6M16 26l6-6" stroke="#1e40af" strokeWidth="3" strokeLinecap="round"/></svg>
-      <span className="block text-xs text-blue-700 font-bold mt-1">Click here</span>
-    </div>
-  ) : null;
-
   return (
     <>
       {/* Highlighted border with pulse and bounce */}
@@ -204,8 +176,6 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
           }}
         />
       )}
-      {/* Animated indicator */}
-      {highlightRect && <Indicator />}
       {/* Tutorial card with arrow, Next button only if no highlightRef */}
       <div
         className="z-50 bg-blue-900 border border-blue-500 rounded-lg shadow-lg p-6 absolute animate-fade-in"
@@ -243,7 +213,6 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
             </button>
           )}
         </div>
-        {highlightRect && <ArrowSVG dir={arrowDir} />}
       </div>
       <style>{`.tutorial-highlight-cursor { cursor: pointer !important; box-shadow: 0 0 0 4px #1e40af55 !important; }`}</style>
     </>
