@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
-import { Play, Square, Settings, FileText, Terminal, Keyboard } from 'lucide-react';
+import { Play, Square, Settings, FileText, Terminal, Keyboard, HelpCircle, ArrowRight, X } from 'lucide-react';
 
 const LANGUAGE_OPTIONS = [
   { id: 71, name: 'Python', monaco: 'python', extension: '.py' },
@@ -78,6 +78,178 @@ public class Main {
 `
 };
 
+function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
+  const [highlightRect, setHighlightRect] = useState(null);
+  useEffect(() => {
+    if (highlightRef && highlightRef.current) {
+      const rect = highlightRef.current.getBoundingClientRect();
+      setHighlightRect(rect);
+      highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Add click handler to highlighted element
+      const el = highlightRef.current;
+      const handleClick = (e) => {
+        e.stopPropagation();
+        onNext();
+      };
+      el.classList.add('tutorial-highlight-cursor');
+      el.addEventListener('click', handleClick, { once: true });
+      return () => {
+        el.classList.remove('tutorial-highlight-cursor');
+        el.removeEventListener('click', handleClick);
+      };
+    } else {
+      setHighlightRect(null);
+    }
+  }, [currentStep, highlightRef, onNext]);
+
+  if (currentStep === null) return null;
+  const { title, description, placement, highlightRef: stepHighlightRef } = steps[currentStep];
+
+  // Position the tutorial card near the highlighted element
+  let cardStyle = { zIndex: 1001 };
+  let arrowStyle = {};
+  let arrowDir = 'down';
+  const CARD_MAX_WIDTH = 340;
+  const CARD_HEIGHT = 180; // estimate for clamping
+  if (highlightRect) {
+    // Calculate initial position
+    let left = placement === 'right' ? highlightRect.right + 24 : highlightRect.left;
+    let top = highlightRect.top;
+    if (placement === 'bottom') {
+      top = highlightRect.bottom + 16;
+      left = highlightRect.left;
+      arrowStyle = { left: 24, top: -16 };
+      arrowDir = 'up';
+    }
+    if (placement === 'top') {
+      top = highlightRect.top - 120;
+      left = highlightRect.left;
+      arrowStyle = { left: 24, top: 104 };
+      arrowDir = 'down';
+    }
+    if (placement === 'right') {
+      left = highlightRect.right + 24;
+      top = highlightRect.top;
+      arrowStyle = { left: -16, top: 24 };
+      arrowDir = 'left';
+    }
+    if (placement === 'left') {
+      left = highlightRect.left - CARD_MAX_WIDTH - 20;
+      top = highlightRect.top;
+      arrowStyle = { left: CARD_MAX_WIDTH, top: 24 };
+      arrowDir = 'right';
+    }
+    // Clamp to viewport
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    left = Math.max(8, Math.min(left, viewportWidth - CARD_MAX_WIDTH - 8));
+    top = Math.max(8, Math.min(top, viewportHeight - CARD_HEIGHT - 8));
+    cardStyle = {
+      ...cardStyle,
+      position: 'fixed',
+      left,
+      top,
+      maxWidth: CARD_MAX_WIDTH,
+      transition: 'all 0.3s',
+      wordBreak: 'break-word',
+      whiteSpace: 'pre-line',
+      overflowWrap: 'break-word',
+    };
+  } else {
+    cardStyle = { ...cardStyle, position: 'fixed', left: '50%', top: '20%', transform: 'translate(-50%, 0)', maxWidth: CARD_MAX_WIDTH, wordBreak: 'break-word', whiteSpace: 'pre-line', overflowWrap: 'break-word' };
+  }
+
+  // Arrow SVGs
+  const ArrowSVG = ({ dir }) => {
+    if (dir === 'up')
+      return <svg width="32" height="16" className="absolute" style={arrowStyle}><polygon points="16,0 32,16 0,16" fill="#1e40af" /></svg>;
+    if (dir === 'down')
+      return <svg width="32" height="16" className="absolute" style={arrowStyle}><polygon points="0,0 32,0 16,16" fill="#1e40af" /></svg>;
+    if (dir === 'left')
+      return <svg width="16" height="32" className="absolute" style={arrowStyle}><polygon points="16,0 16,32 0,16" fill="#1e40af" /></svg>;
+    if (dir === 'right')
+      return <svg width="16" height="32" className="absolute" style={arrowStyle}><polygon points="0,0 16,16 0,32" fill="#1e40af" /></svg>;
+    return null;
+  };
+
+  // Animated hand/arrow indicator
+  const Indicator = () => highlightRect ? (
+    <div
+      className="fixed z-50 animate-bounce"
+      style={{
+        left: highlightRect.left + highlightRect.width / 2 - 16,
+        top: highlightRect.bottom + 8,
+        pointerEvents: 'none',
+      }}
+    >
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M16 2v24M16 26l-6-6M16 26l6-6" stroke="#1e40af" strokeWidth="3" strokeLinecap="round"/></svg>
+      <span className="block text-xs text-blue-700 font-bold mt-1">Click here</span>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {/* Highlighted border with pulse and bounce */}
+      {highlightRect && (
+        <div
+          className="fixed z-50 border-4 border-blue-500 rounded-lg pointer-events-none animate-pulse animate-bounce"
+          style={{
+            left: highlightRect.left - 6,
+            top: highlightRect.top - 6,
+            width: highlightRect.width + 12,
+            height: highlightRect.height + 12,
+            boxSizing: 'border-box',
+            transition: 'all 0.3s',
+            boxShadow: '0 0 0 8px rgba(30,64,175,0.15)',
+          }}
+        />
+      )}
+      {/* Animated indicator */}
+      {highlightRect && <Indicator />}
+      {/* Tutorial card with arrow, Next button only if no highlightRef */}
+      <div
+        className="z-50 bg-blue-900 border border-blue-500 rounded-lg shadow-lg p-6 absolute animate-fade-in"
+        style={{
+          ...cardStyle,
+          maxWidth: 340,
+          wordBreak: 'break-word',
+          whiteSpace: 'pre-line',
+          overflowWrap: 'break-word',
+        }}
+      >
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-lg font-bold text-blue-200">{title}</h2>
+          <button onClick={onSkip} className="text-gray-300 hover:text-white ml-2"><X size={18} /></button>
+        </div>
+        <p className="text-gray-100 mb-2" style={{wordBreak: 'break-word', whiteSpace: 'pre-line', overflowWrap: 'break-word'}}>{description}</p>
+        <div className="flex justify-end">
+          {!stepHighlightRef && currentStep !== steps.length - 1 && (
+            <button
+              onClick={onNext}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Next
+            </button>
+          )}
+          {stepHighlightRef && (
+            <span className="text-xs text-blue-300 mr-2">Click the highlighted area to continue</span>
+          )}
+          {currentStep === steps.length - 1 && (
+            <button
+              onClick={onNext}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Finish
+            </button>
+          )}
+        </div>
+        {highlightRect && <ArrowSVG dir={arrowDir} />}
+      </div>
+      <style>{`.tutorial-highlight-cursor { cursor: pointer !important; box-shadow: 0 0 0 4px #1e40af55 !important; }`}</style>
+    </>
+  );
+}
+
 export default function CodeIDE() {
   const [selectedLanguage, setSelectedLanguage] = useState(LANGUAGE_OPTIONS[0]);
   const [code, setCode] = useState(DEFAULT_CODE.python);
@@ -88,8 +260,15 @@ export default function CodeIDE() {
   const [theme, setTheme] = useState('vs-dark');
   const [fontSize, setFontSize] = useState(14);
   const [showSettings, setShowSettings] = useState(false);
-  
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(null);
+
   const editorRef = useRef(null);
+  const langRef = useRef();
+  const editorContainerRef = useRef();
+  const runBtnRef = useRef();
+  const tabsRef = useRef();
+  const settingsRef = useRef();
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -173,6 +352,65 @@ export default function CodeIDE() {
     setInput('');
   };
 
+  // Tutorial steps definition
+  const tutorialSteps = [
+    {
+      title: 'Welcome to CodeIDE!',
+      description: 'This is your online code editor. Let\'s take a quick tour of the main features.',
+    },
+    {
+      title: 'Select Language',
+      description: 'Choose your programming language from this dropdown.',
+      highlightRef: langRef,
+      placement: 'bottom',
+    },
+    {
+      title: 'Code Editor',
+      description: 'Write your code here. The editor supports syntax highlighting and more.',
+      highlightRef: editorContainerRef,
+      placement: 'right',
+    },
+    {
+      title: 'Run Button',
+      description: 'Click here or press Ctrl+Enter to run your code.',
+      highlightRef: runBtnRef,
+      placement: 'bottom',
+    },
+    {
+      title: 'Input/Output Tabs',
+      description: 'Switch between input and output for your program using these tabs.',
+      highlightRef: tabsRef,
+      placement: 'bottom',
+    },
+    {
+      title: 'Settings',
+      description: 'Adjust theme and font size from the settings panel.',
+      highlightRef: settingsRef,
+      placement: 'bottom',
+    },
+    {
+      title: 'End of Tutorial',
+      description: 'You are ready to use CodeIDE! You can restart this tutorial anytime.',
+    },
+  ];
+
+  const startTutorial = () => {
+    setShowTutorial(true);
+    setTutorialStep(0);
+  };
+  const handleNextTutorial = () => {
+    if (tutorialStep < tutorialSteps.length - 1) {
+      setTutorialStep(tutorialStep + 1);
+    } else {
+      setShowTutorial(false);
+      setTutorialStep(null);
+    }
+  };
+  const handleSkipTutorial = () => {
+    setShowTutorial(false);
+    setTutorialStep(null);
+  };
+
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col">
       {/* Header */}
@@ -181,6 +419,7 @@ export default function CodeIDE() {
           <h1 className="text-xl font-bold text-blue-400">CodeIDE</h1>
           <div className="flex items-center space-x-2">
             <select
+              ref={langRef}
               value={selectedLanguage.name}
               onChange={(e) => {
                 const lang = LANGUAGE_OPTIONS.find(l => l.name === e.target.value);
@@ -196,9 +435,17 @@ export default function CodeIDE() {
             </select>
           </div>
         </div>
-        
         <div className="flex items-center space-x-2">
           <button
+            onClick={startTutorial}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded transition-colors"
+            title="Show Tutorial"
+          >
+            <HelpCircle size={16} />
+            <span className="text-sm hidden sm:inline">Tutorial</span>
+          </button>
+          <button
+            ref={settingsRef}
             onClick={() => setShowSettings(!showSettings)}
             className="p-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
             title="Settings"
@@ -206,6 +453,7 @@ export default function CodeIDE() {
             <Settings size={16} />
           </button>
           <button
+            ref={runBtnRef}
             onClick={runCode}
             disabled={isRunning}
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 rounded transition-colors"
@@ -251,7 +499,7 @@ export default function CodeIDE() {
       {/* Main Content */}
       <div className="flex-1 flex">
         {/* Code Editor */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col" ref={editorContainerRef}>
           <div className="bg-gray-800 px-4 py-2 border-b border-gray-700">
             <div className="flex items-center space-x-2">
               <FileText size={16} />
@@ -286,7 +534,7 @@ export default function CodeIDE() {
         {/* Right Panel */}
         <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
           {/* Tabs */}
-          <div className="flex border-b border-gray-700">
+          <div className="flex border-b border-gray-700" ref={tabsRef}>
             <button
               onClick={() => setActiveTab('input')}
               className={`flex-1 flex items-center justify-center space-x-2 px-4 py-3 text-sm transition-colors ${
@@ -366,6 +614,17 @@ export default function CodeIDE() {
           <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-green-500' : 'bg-gray-600'}`}></span>
         </div>
       </div>
+
+      {/* Tutorial Overlay */}
+      {showTutorial && (
+        <TutorialOverlay
+          steps={tutorialSteps}
+          currentStep={tutorialStep}
+          onNext={handleNextTutorial}
+          onSkip={handleSkipTutorial}
+          highlightRef={tutorialSteps[tutorialStep]?.highlightRef}
+        />
+      )}
     </div>
   );
 }
