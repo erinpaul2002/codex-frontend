@@ -23,8 +23,7 @@ print(f"Hello, {name}!")
 a = 10
 b = 20
 print(f"Sum: {a + b}")
-`,
-  c: `#include <stdio.h>
+`,  c: `#include <stdio.h>
 
 int main() {
     printf("Hello, World!\\n");
@@ -78,8 +77,11 @@ public class Main {
 `
 };
 
-function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
+function TutorialOverlay({ steps, currentStep, onNext, onSkip }) {
   const [highlightRect, setHighlightRect] = useState(null);
+  const step = steps[currentStep];
+  const highlightRef = step && step.highlightRef;
+
   useEffect(() => {
     if (highlightRef && highlightRef.current) {
       const rect = highlightRef.current.getBoundingClientRect();
@@ -103,7 +105,7 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
   }, [currentStep, highlightRef, onNext]);
 
   if (currentStep === null) return null;
-  const { title, description, placement, highlightRef: stepHighlightRef } = steps[currentStep];
+  const { title, description, placement } = step;
 
   // Position the tutorial card near the highlighted element
   let cardStyle = { zIndex: 1001 };
@@ -179,13 +181,7 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
       {/* Tutorial card with arrow, Next button only if no highlightRef */}
       <div
         className="z-50 bg-blue-900 border border-blue-500 rounded-lg shadow-lg p-6 absolute animate-fade-in"
-        style={{
-          ...cardStyle,
-          maxWidth: 340,
-          wordBreak: 'break-word',
-          whiteSpace: 'pre-line',
-          overflowWrap: 'break-word',
-        }}
+        style={cardStyle}
       >
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-bold text-blue-200">{title}</h2>
@@ -193,7 +189,7 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
         </div>
         <p className="text-gray-100 mb-2" style={{wordBreak: 'break-word', whiteSpace: 'pre-line', overflowWrap: 'break-word'}}>{description}</p>
         <div className="flex justify-end">
-          {!stepHighlightRef && currentStep !== steps.length - 1 && (
+          {!highlightRef && currentStep !== steps.length - 1 && (
             <button
               onClick={onNext}
               className="flex items-center px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -201,7 +197,7 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
               Next
             </button>
           )}
-          {stepHighlightRef && (
+          {highlightRef && (
             <span className="text-xs text-blue-300 mr-2">Click the highlighted area to continue</span>
           )}
           {currentStep === steps.length - 1 && (
@@ -222,10 +218,9 @@ function TutorialOverlay({ steps, currentStep, onNext, onSkip, highlightRef }) {
 export default function CodeIDE() {
   const [selectedLanguage, setSelectedLanguage] = useState(LANGUAGE_OPTIONS[0]);
   const [code, setCode] = useState(DEFAULT_CODE.python);
-  const [input, setInput] = useState('');
-  const [output, setOutput] = useState('');
+  const [terminalLines, setTerminalLines] = useState([]); // [{type: 'output'|'input', text: string}]
+  const [currentInput, setCurrentInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
-  const [activeTab, setActiveTab] = useState('output');
   const [theme, setTheme] = useState('vs-dark');
   const [fontSize, setFontSize] = useState(14);
   const [showSettings, setShowSettings] = useState(false);
@@ -236,13 +231,23 @@ export default function CodeIDE() {
   const langRef = useRef();
   const editorContainerRef = useRef();
   const runBtnRef = useRef();
-  const tabsRef = useRef();
   const settingsRef = useRef();
+  const terminalEndRef = useRef();
+  const wsRef = useRef(null);
+  const inputRef = useRef();
+  const terminalDivRef = useRef();
+
+  const [wsConnected, setWsConnected] = useState(false);
+  const [pendingInput, setPendingInput] = useState([]);
+
+  useEffect(() => {
+    if (terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [terminalLines]);
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
-    
-    // Set editor options
     editor.updateOptions({
       fontSize: fontSize,
       minimap: { enabled: true },
@@ -251,8 +256,6 @@ export default function CodeIDE() {
       scrollBeyondLastLine: false,
       automaticLayout: true,
     });
-
-    // Add keyboard shortcuts
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       runCode();
     });
@@ -261,64 +264,110 @@ export default function CodeIDE() {
   const handleLanguageChange = (language) => {
     setSelectedLanguage(language);
     setCode(DEFAULT_CODE[language.monaco] || '// Start coding here...');
-    setOutput('');
-    setInput('');
+    setTerminalLines([]);
+    setCurrentInput('');
   };
 
   const runCode = async () => {
     if (isRunning) return;
-    
     setIsRunning(true);
-    setActiveTab('output');
-    setOutput('Running...');
-
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/run`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          source_code: code,
-          language_id: selectedLanguage.id,
-          stdin: input,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    setTerminalLines([{ type: 'output', text: 'Running...' }]);
+    setCurrentInput('');
+    setPendingInput([]);    if (selectedLanguage.name === 'Python' || selectedLanguage.name === 'Java' || selectedLanguage.name === 'C' || selectedLanguage.name === 'C++') {
+      // Real-time Python, Java, C, and C++ via WebSocket
+      if (wsRef.current) {
+        wsRef.current.close();
       }
-
-      const result = await response.json();
-      
-      let outputText = '';
-      if (result.stdout) {
-        outputText += result.stdout;
+      const ws = new window.WebSocket('ws://localhost:8000/python-terminal');
+      wsRef.current = ws;
+      setWsConnected(false);
+      ws.onopen = () => {
+        setWsConnected(true);
+        ws.send(JSON.stringify({ code, input: '', language: selectedLanguage.name.toLowerCase() }));
+      };
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'stdout') {
+            setTerminalLines(lines => [...lines, { type: 'output', text: msg.data }]);
+          } else if (msg.type === 'stderr') {
+            setTerminalLines(lines => [...lines, { type: 'output', text: msg.data }]);
+          } else if (msg.type === 'exit') {
+            setTerminalLines(lines => [...lines, { type: 'output', text: `\n[Process exited with code ${msg.code}]` }]);
+            setIsRunning(false);
+            setWsConnected(false);
+          } else if (msg.type === 'error') {
+            setTerminalLines(lines => [...lines, { type: 'output', text: `[Error] ${msg.error}` }]);
+            setIsRunning(false);
+            setWsConnected(false);
+          }
+        } catch (e) {
+          setTerminalLines(lines => [...lines, { type: 'output', text: `[Parse error] ${event.data}` }]);
+        }
+      };
+      ws.onclose = () => {
+        setIsRunning(false);
+        setWsConnected(false);
+      };
+      ws.onerror = () => {
+        setTerminalLines(lines => [...lines, { type: 'output', text: '[WebSocket error]' }]);
+        setIsRunning(false);
+        setWsConnected(false);
+      };
+    } else {
+      // Fallback: HTTP for other languages
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_code: code,
+            language_id: selectedLanguage.id,
+            stdin: terminalLines.filter(l => l.type === 'input').map(l => l.text).join('\n'),
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const result = await response.json();
+        let outputText = '';
+        if (result.stdout) outputText += result.stdout;
+        if (result.stderr) outputText += result.stderr;
+        if (result.compile_output) outputText += `Compilation Output:\n${result.compile_output}`;
+        if (!outputText && result.status && result.status.description) outputText = `Status: ${result.status.description}`;
+        setTerminalLines(lines => [...lines, { type: 'output', text: outputText || 'No output' }]);
+      } catch (error) {
+        setTerminalLines(lines => [...lines, { type: 'output', text: `Error: ${error.message}\n\nMake sure the backend server is running on http://localhost:8000` }]);
+      } finally {
+        setIsRunning(false);
       }
-      if (result.stderr) {
-        outputText += result.stderr;
-      }
-      if (result.compile_output) {
-        outputText += `Compilation Output:\\n${result.compile_output}`;
-      }
-      if (!outputText && result.status && result.status.description) {
-        outputText = `Status: ${result.status.description}`;
-      }
-      
-      setOutput(outputText || 'No output');
-    } catch (error) {
-      setOutput(`Error: ${error.message}\\n\\nMake sure the backend server is running on http://localhost:8000`);
-    } finally {
-      setIsRunning(false);
     }
   };
 
-  const clearOutput = () => {
-    setOutput('');
+  // Send input to Python/Java/C/C++ process via WebSocket
+  const handleTerminalInput = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!currentInput.trim()) return;
+      setTerminalLines(lines => [...lines, { type: 'input', text: currentInput }]);
+      if ((selectedLanguage.name === 'Python' || selectedLanguage.name === 'Java' || selectedLanguage.name === 'C' || selectedLanguage.name === 'C++') && wsRef.current && wsConnected) {
+        wsRef.current.send(JSON.stringify({ input: currentInput }));
+      }
+      setCurrentInput('');
+    }
   };
 
-  const clearInput = () => {
-    setInput('');
+  // Clean up WebSocket on unmount or language change
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [selectedLanguage.name]);
+
+  const clearTerminal = () => {
+    setTerminalLines([]);
+    setCurrentInput('');
   };
 
   // Tutorial steps definition
@@ -329,37 +378,37 @@ export default function CodeIDE() {
     },
     {
       title: 'Select Language',
-      description: 'Choose your programming language from this dropdown.',
+      description: 'Choose your programming language from this dropdown. Supported: Python, C, C++, Java.',
       highlightRef: langRef,
       placement: 'bottom',
     },
     {
       title: 'Code Editor',
-      description: 'Write your code here. The editor supports syntax highlighting and more.',
+      description: 'Write your code here. The editor supports syntax highlighting, autocompletion, and more.',
       highlightRef: editorContainerRef,
       placement: 'right',
     },
     {
       title: 'Run Button',
-      description: 'Click here or press Ctrl+Enter to run your code.',
+      description: 'Click here or press Ctrl+Enter to run your code. The output will appear in the terminal below.',
       highlightRef: runBtnRef,
       placement: 'bottom',
     },
     {
-      title: 'Input/Output Tabs',
-      description: 'Switch between input and output for your program using these tabs.',
-      highlightRef: tabsRef,
+      title: 'Terminal',
+      description: 'View output and interact with your program in this terminal area. For interactive programs, type your input and press Enter.',
+      highlightRef: terminalDivRef,
       placement: 'bottom',
     },
     {
       title: 'Settings',
-      description: 'Adjust theme and font size from the settings panel.',
+      description: 'Adjust the editor theme and font size from the settings panel.',
       highlightRef: settingsRef,
       placement: 'bottom',
     },
     {
       title: 'End of Tutorial',
-      description: 'You are ready to use CodeIDE! You can restart this tutorial anytime.',
+      description: 'You are ready to use CodeIDE! You can restart this tutorial anytime by clicking the Tutorial button.',
     },
   ];
 
@@ -380,6 +429,12 @@ export default function CodeIDE() {
     setTutorialStep(null);
   };
 
+  useEffect(() => {
+    if (isRunning && terminalDivRef.current) {
+      terminalDivRef.current.focus();
+    }
+  }, [isRunning, selectedLanguage.name]);
+
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col">
       {/* Header */}
@@ -397,9 +452,7 @@ export default function CodeIDE() {
               className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               {LANGUAGE_OPTIONS.map((lang) => (
-                <option key={lang.id} value={lang.name}>
-                  {lang.name}
-                </option>
+                <option key={lang.id} value={lang.name}>{lang.name}</option>
               ))}
             </select>
           </div>
@@ -500,87 +553,64 @@ export default function CodeIDE() {
           </div>
         </div>
 
-        {/* Right Panel */}
+        {/* Terminal Panel */}
         <div className="w-96 bg-gray-800 border-l border-gray-700 flex flex-col">
-          {/* Tabs */}
-          <div className="flex border-b border-gray-700" ref={tabsRef}>
+          <div className="flex justify-between items-center p-3 border-b border-gray-700">
+            <span className="text-sm text-gray-300">Terminal</span>
             <button
-              onClick={() => setActiveTab('input')}
-              className={`flex-1 flex items-center justify-center space-x-2 px-4 py-3 text-sm transition-colors ${
-                activeTab === 'input'
-                  ? 'bg-gray-700 text-white border-b-2 border-blue-500'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-750'
-              }`}
+              onClick={clearTerminal}
+              className="text-xs text-gray-400 hover:text-white px-2 py-1 hover:bg-gray-700 rounded"
             >
-              <Keyboard size={16} />
-              <span>Input</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('output')}
-              className={`flex-1 flex items-center justify-center space-x-2 px-4 py-3 text-sm transition-colors ${
-                activeTab === 'output'
-                  ? 'bg-gray-700 text-white border-b-2 border-blue-500'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-750'
-              }`}
-            >
-              <Terminal size={16} />
-              <span>Output</span>
+              Clear
             </button>
           </div>
-
-          {/* Tab Content */}
-          <div className="flex-1 flex flex-col">
-            {activeTab === 'input' ? (
-              <>
-                <div className="p-3 border-b border-gray-700 flex justify-between items-center">
-                  <span className="text-sm text-gray-300">Program Input</span>
-                  <button
-                    onClick={clearInput}
-                    className="text-xs text-gray-400 hover:text-white px-2 py-1 hover:bg-gray-700 rounded"
-                  >
-                    Clear
-                  </button>
-                </div>
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Enter input for your program here..."
-                  className="flex-1 bg-gray-900 text-white p-3 font-mono text-sm resize-none border-none outline-none focus:ring-2 focus:ring-blue-500"
-                  style={{ fontFamily: 'var(--font-geist-mono)' }}
-                />
-              </>
-            ) : (
-              <>
-                <div className="p-3 border-b border-gray-700 flex justify-between items-center">
-                  <span className="text-sm text-gray-300">Program Output</span>
-                  <button
-                    onClick={clearOutput}
-                    className="text-xs text-gray-400 hover:text-white px-2 py-1 hover:bg-gray-700 rounded"
-                  >
-                    Clear
-                  </button>
-                </div>
-                <div className="flex-1 bg-gray-900 p-3 overflow-auto">
-                  <pre className="text-sm font-mono whitespace-pre-wrap text-gray-100">
-                    {output || 'Run your code to see output here...'}
-                  </pre>
-                </div>
-              </>
+          <div
+            className="flex-1 bg-gray-900 p-3 overflow-auto outline-none"
+            style={{ fontFamily: 'var(--font-geist-mono)', cursor: 'text' }}
+            tabIndex={0}
+            ref={terminalDivRef}
+            onClick={() => terminalDivRef.current && terminalDivRef.current.focus()}
+            onKeyDown={e => {
+              if (!isRunning) return;
+              if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                setCurrentInput(inp => inp + e.key);
+                e.preventDefault();
+              } else if (e.key === 'Backspace') {
+                setCurrentInput(inp => inp.slice(0, -1));
+                e.preventDefault();              } else if (e.key === 'Enter') {
+                if (currentInput.trim()) {
+                  setTerminalLines(lines => [...lines, { type: 'input', text: currentInput }]);
+                  if ((selectedLanguage.name === 'Python' || selectedLanguage.name === 'Java' || selectedLanguage.name === 'C' || selectedLanguage.name === 'C++') && wsRef.current && wsConnected) {
+                    wsRef.current.send(JSON.stringify({ input: currentInput }));
+                  }
+                  setCurrentInput('');
+                }
+                e.preventDefault();
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                // Prevent cursor movement
+                e.preventDefault();
+              }
+            }}
+          >
+            {terminalLines.map((line, idx) => (
+              <div key={idx} className={line.type === 'input' ? 'text-blue-300' : 'text-gray-100'}>
+                {line.type === 'input' ? (
+                  <span>&gt; {line.text}</span>
+                ) : (
+                  <pre className="whitespace-pre-wrap" style={{ margin: 0 }}>{line.text}</pre>
+                )}
+              </div>
+            ))}
+            {/* Inline input prompt for REPL UX for all languages */}
+            {isRunning && (
+              <div className="text-blue-300" style={{ display: 'flex', alignItems: 'center' }}>
+                <span>&gt; </span>
+                <span style={{ whiteSpace: 'pre', minWidth: '1ch' }}>{currentInput}</span>
+                <span className="blinking-cursor">&#9608;</span>
+              </div>
             )}
+            <div style={{ height: 1 }} />
           </div>
-        </div>
-      </div>
-
-      {/* Status Bar */}
-      <div className="bg-gray-800 border-t border-gray-700 px-4 py-2 text-xs text-gray-400 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <span>Language: {selectedLanguage.name}</span>
-          <span>Theme: {theme}</span>
-          <span>Font: {fontSize}px</span>
-        </div>
-        <div className="flex items-center space-x-4">
-          <span>Press Ctrl+Enter to run</span>
-          <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-green-500' : 'bg-gray-600'}`}></span>
         </div>
       </div>
 
@@ -591,9 +621,23 @@ export default function CodeIDE() {
           currentStep={tutorialStep}
           onNext={handleNextTutorial}
           onSkip={handleSkipTutorial}
-          highlightRef={tutorialSteps[tutorialStep]?.highlightRef}
+          highlightRef={tutorialSteps[tutorialStep]?.highlightRef || null}
         />
       )}
+
+      <style>{`
+        .blinking-cursor {
+          display: inline-block;
+          width: 8px;
+          height: 16px;
+          background-color: #2563eb;
+          animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect } from 'react';
-import CodeIDE from '../components/CodeIDE';
+import ModularCodeIDE from '../components/ModularCodeIDE';
 
 export default function Home() {
   useEffect(() => {
@@ -10,6 +10,6 @@ export default function Home() {
   }, []);
 
   return (
-    <CodeIDE />
+    <ModularCodeIDE />
   );
 }
