@@ -278,7 +278,7 @@ export default function CodeIDE() {
       if (wsRef.current) {
         wsRef.current.close();
       }
-      const ws = new window.WebSocket('ws://localhost:8000/python-terminal');
+      const ws = new window.WebSocket(`${process.env.NEXT_PUBLIC_API_URL}/python-terminal`);
       wsRef.current = ws;
       setWsConnected(false);
       ws.onopen = () => {

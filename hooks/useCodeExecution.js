@@ -71,7 +71,7 @@ export const useCodeExecution = (selectedLanguage, code) => {
 
     if (isInteractiveLanguage(selectedLanguage.name)) {
       // Real-time execution via WebSocket
-      wsManagerRef.current.connect('ws://localhost:8000/python-terminal');
+      wsManagerRef.current.connect(`${process.env.NEXT_PUBLIC_API_URL}/python-terminal`);
     } else {
       // HTTP execution for non-interactive languages
       try {
